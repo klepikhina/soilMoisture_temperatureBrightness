@@ -1,0 +1,279 @@
+classes:
+  - nsidc_jenkins
+  - nsidc_nfs
+  - nsidc_miniconda
+
+nsidc_miniconda::install:
+  /opt/miniconda:
+    owner: vagrant
+    group: vagrant
+    build: true
+    config:
+      location: /home/vagrant
+      channels:
+        anaconda_nsidc_main: true
+        anaconda_nsidc_dev: true
+        conda_forge: true
+    packages:
+      - 'fabric>=1.10*'
+      - 'bumpversion==0.5.1'
+      - anaconda-client
+      - flake8=3.0.4=py27_1
+      - nose
+      - nose-exclude
+
+
+nsidc_nfs::sharemounts:
+  /share/sw/packages:
+    project: sw
+    share: packages
+
+nsidc_jenkins::use_vagrant: true
+
+nsidc_jenkins::jobs:
+
+  # ==============================================================
+  # CI Jobs (Build, Deploy and Test a Snapshot)
+
+  "%{hiera('project')}_1_CI_1_Checkout":
+    git:
+      repo: "%{hiera('gitrepo')}"
+      poll_scm: true
+    parameters:
+      - type: string
+        name: ref
+        description: git ref (branch, tag, commit SHA) to checkout
+        default: "%{hiera('branch')}"
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/ci
+    description: Clone the repository and checkout ref {master}
+    command: git checkout $ref
+    trigger_job: "%{hiera('project')}_1_CI_2_Build_Snapshot"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_1_CI_2_Build_Snapshot":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/ci/source
+    description: conda build a snapshot package on the CI VM
+    command: |
+      . /etc/profile.d/miniconda.sh
+      fab build:recipe,dev
+    trigger_job: "%{hiera('project')}_1_CI_3_Deploy_Snapshot"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_1_CI_3_Deploy_Snapshot":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/ci/source
+    description: deploy the dev package to desired location (local/anaconda.org)
+    command: |
+      . /etc/profile.d/miniconda.sh
+      export ANACONDA_TOKEN=`sudo cat /home/vagrant/anaconda/anaconda.token`
+      fab deploy.anaconda:dev,${ANACONDA_TOKEN}
+    trigger_job: "%{hiera('project')}_1_CI_4_Provision_Integration"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_1_CI_4_Provision_Integration":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/ci
+    description: hijack and provision the integration machine.
+    command: |
+      rm -rf .vagrant-integration;
+      (vagrant nsidc hijack --env=integration || true)
+      vagrant nsidc up --env=integration --provision;
+    trigger_job: "%{hiera('project')}_1_CI_5_Install_on_Integration"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_1_CI_5_Install_on_Integration":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/ci
+    description: Install the dev conda package on the integration VM
+    command: |
+      export PKG_VERSION=`cat source/__conda_version__.txt`
+
+          # conda doesn't have a force download from cloud:
+      uninstall="conda uninstall %{hiera('project')} || true"
+      clean="conda clean --tarballs --packages || true"
+      install="conda install -c nsidc/channel/dev %{hiera('project')}==${PKG_VERSION}"
+
+      vagrant nsidc ssh -c "$uninstall && $clean && $install" --env=integration
+
+    trigger_job: "%{hiera('project')}_1_CI_6_Run_All_Tests_on_Integration"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_1_CI_6_Run_All_Tests_on_Integration":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/ci
+    description: run all tests for the package on the integration VM
+    command: |
+      vagrant nsidc ssh --env=integration -c "python -c \"from cetbtools.inspector import make_cetb_png; make_cetb_png('/vagrant/source/cetbtools/test/qa_test_files/NSIDC-0630-EASE2_N25km-AQUA_AMSRE-2008278-18H-E-GRD-RSS-v1.0.nc')\""
+      vagrant nsidc ssh --env=integration -c "python -c \"from cetbtools.inspector import make_cetb_geotiff; make_cetb_geotiff('/vagrant/source/cetbtools/test/qa_test_files/NSIDC-0630-EASE2_N25km-AQUA_AMSRE-2008278-18H-E-GRD-RSS-v1.0.nc')\""
+
+
+  # ENDS CI chain.
+
+  # ==============================================================
+  # Release Candidate Jobs (create and build a release and deploy to the dev channel)
+  "%{hiera('project')}_2_RC_1_Checkout":
+    git:
+      repo: "%{hiera('gitrepo')}"
+      poll_scm: false
+    parameters:
+      - type: string
+        name: ref
+        description: git ref (branch, tag, commit SHA) to checkout
+        default: "%{hiera('branch')}"
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/rc
+    description: clone the project and checkout the desired reference.
+    command: git checkout $ref
+    trigger_job: "%{hiera('project')}_2_RC_2_Build_Package"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_2_RC_2_Build_Package":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/rc/source
+    description: build a release candidate package on the CI VM
+    command: |
+      . /etc/profile.d/miniconda.sh
+      # Write a version file with no decoration.  e.g. 0.0.1
+      fab build:${WORKSPACE}/recipe,""
+      fab version.tag
+    trigger_job: "%{hiera('project')}_2_RC_3_Deploy_Package"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_2_RC_3_Deploy_Package":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/rc/source
+    description: deploy the package from the CI VM to desired dev channel location
+    command: |
+      . /etc/profile.d/miniconda.sh
+      export ANACONDA_TOKEN=`sudo cat /home/vagrant/anaconda/anaconda.token`
+      fab deploy.anaconda:dev,${ANACONDA_TOKEN}
+    trigger_job: "%{hiera('project')}_2_RC_4_Provision_QA"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_2_RC_4_Provision_QA":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/rc
+    description: hijack and provision the QA machine.
+    command: |
+      rm -rf .vagrant-qa;
+      (vagrant nsidc hijack --env=qa || true)
+      vagrant nsidc up --env=qa --provision;
+    trigger_job: "%{hiera('project')}_2_RC_5_Install_on_QA"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_2_RC_5_Install_on_QA":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/rc
+    description: Install the conda release candidate package on the QA VM
+    command: |
+      export PKG_VERSION=`cat source/__conda_version__.txt`
+
+      # conda doesn't have a force download from cloud:
+      uninstall="conda uninstall %{hiera('project')} || true"
+      clean="conda clean --tarballs --packages || true"
+      install="conda install -c nsidc/channel/dev %{hiera('project')}==${PKG_VERSION}"
+
+      vagrant nsidc ssh -c "$uninstall && $clean && $install" --env=qa
+
+    trigger_job: "%{hiera('project')}_2_RC_6_Run_All_Tests_on_QA"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_2_RC_6_Run_All_Tests_on_QA":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/rc
+    description: run all tests for the package on the QA vm
+    command: |
+      vagrant nsidc ssh --env=qa -c "python -c \"from cetbtools.inspector import make_cetb_png; make_cetb_png('/vagrant/source/cetbtools/test/qa_test_files/NSIDC-0630-EASE2_N25km-AQUA_AMSRE-2008278-18H-E-GRD-RSS-v1.0.nc')\""
+      vagrant nsidc ssh --env=qa -c "python -c \"from cetbtools.inspector import make_cetb_geotiff; make_cetb_geotiff('/vagrant/source/cetbtools/test/qa_test_files/NSIDC-0630-EASE2_N25km-AQUA_AMSRE-2008278-18H-E-GRD-RSS-v1.0.nc')\""
+
+  #  end of Release Candidate Jobs:
+
+
+  # ==============================================================
+  # Release Jobs (create and build a release)
+  "%{hiera('project')}_3_RELEASE_1_Checkout":
+    git:
+      repo: "%{hiera('gitrepo')}"
+      poll_scm: false
+    parameters:
+      - type: string
+        name: ref
+        description: git tag to checkout
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/release
+    description: clone the project and checkout the desired reference.
+    command: git checkout $ref
+    trigger_job: "%{hiera('project')}_3_RELEASE_2_Build_Package"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_3_RELEASE_2_Build_Package":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/release/source
+    description: build a release package.
+    command: |
+      . /etc/profile.d/miniconda.sh
+      # Write a version file with no decoration.  e.g. 0.0.1
+      fab build:${WORKSPACE}/recipe,""
+    trigger_job: "%{hiera('project')}_3_RELEASE_3_Deploy_Package"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_3_RELEASE_3_Deploy_Package":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/release/source
+    description: deploy the package from the CI VM to desired location main channel
+    command: |
+      . /etc/profile.d/miniconda.sh
+      export ANACONDA_TOKEN=`sudo cat /home/vagrant/anaconda/anaconda.token`
+      fab deploy.anaconda:main,${ANACONDA_TOKEN}
+    trigger_job: "%{hiera('project')}_3_RELEASE_4_Cleanup"
+    trigger_threshold: UNSTABLE
+
+  "%{hiera('project')}_3_RELEASE_4_Cleanup":
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/release/source
+    description: remove package from dev channel.
+    command: |
+      set -xe
+      . /etc/profile.d/miniconda.sh
+      export ANACONDA_TOKEN=`sudo cat /home/vagrant/anaconda/anaconda.token`
+      fab clean.remove_dev_packages:%{hiera('project')},$ANACONDA_TOKEN
+
+    trigger_job: "%{hiera('project')}_3_RELEASE_5_New_Version"
+    trigger_threshold: UNSTABLE
+
+  # END RELEASE JOBS
+
+  # ==============================================================
+  # Cleanup Jobs
+
+  "%{hiera('project')}_4_IMPLODE_Destroy_VMs":
+    git:
+      repo: "%{hiera('gitrepo')}"
+    workspace: /var/lib/jenkins/workspaces/%{hiera('project')}/cleanup
+    description: cleanup project (destroy all the machines)
+    command: |
+
+      # note that all commands (even if they fail) will eval to true
+      #
+      # this allows ALL environments to be cleaned up if one doesnt
+      # exist
+      #
+      # you should monitor the output of this job for real errors
+
+      # cleanup, hijack, destroy, up
+      (rm -rf .vagrant-build || true)
+      (vagrant nsidc hijack --env=build || true)
+      (vagrant nsidc destroy --env=build || true)
+
+      # cleanup, hijack, destroy, up
+      (rm -rf .vagrant-integration || true)
+      (vagrant nsidc hijack --env=integration || true)
+      (vagrant nsidc destroy --env=integration || true)
+
+      # cleanup, hijack, destroy, up
+      (rm -rf .vagrant-qa || true)
+      (vagrant nsidc hijack --env=qa || true)
+      (vagrant nsidc destroy --env=qa || true)
+
+      # cleanup, hijack, destroy, up
+      (rm -rf .vagrant-staging || true)
+      (vagrant nsidc hijack --env=staging || true)
+      (vagrant nsidc destroy --env=staging || true)
+
+      # cleanup, hijack, destroy, up
+      (rm -rf .vagrant-blue || true)
+      (vagrant nsidc hijack --env=blue || true)
+      (vagrant nsidc destroy --env=blue || true)
+
+      # notify the user to do the following on completion
+      echo 'when this job completes you will need to manually destroy ci'
+      echo 'from your local machine (in the project source directory'
+      echo '  >>  rm -rf .vagrant-ci'
+      echo '  >>  vagrant nsidc hijack --env=ci'
+      echo '  >>  vagrant nsidc destroy --env=ci'

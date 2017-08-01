@@ -1,0 +1,31 @@
+classes:
+  - nsidc_emacs
+  - nsidc_nfs
+  - nsidc_miniconda
+
+nsidc_miniconda::install:
+  /opt/miniconda:
+    python_version: "2"
+    build: False
+    config:
+      channels:
+        anaconda_nsidc_dev: true
+        conda_forge: true
+        extra: []
+    packages:
+      - anaconda-client >=1.5.1,<2.0.0
+      - bumpversion=0.5.1
+      - click >=5.1,<6.0
+      - conda-build >=2.0.6,<2.1.0
+      - configobj=5.0.6=py27_0
+      - fabric=1.12.0=py27_0
+      - flake8=3.0.4=py27_1
+      - gdal==2.0.0
+      - krb5
+      - libgdal=2.0.0=0
+      - matplotlib=1.5.3=np111py27_2
+      - netcdf4=1.2.4=np111py27_2
+      - nose
+      - nose-exclude
+      - numpy
+      - proj4

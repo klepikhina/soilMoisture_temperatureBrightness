@@ -1,0 +1,17 @@
+classes:
+  - nsidc_miniconda
+
+nsidc_miniconda::install:
+  /opt/miniconda:
+    build: true
+    config:
+      channels:
+        anaconda_nsidc_dev: true
+        conda_forge: true
+        extra: []
+    packages:
+      - fabric
+      - flake8=3.0.4=py27_1
+      - nose
+      - nose-exclude
+      - rednose

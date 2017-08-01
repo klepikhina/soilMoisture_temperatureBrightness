@@ -1,0 +1,61 @@
+package:
+  name: cetbtools
+  version: "0.0.12"
+
+source:
+  path: ../
+
+build:
+  script: fab test && python setup.py install
+  entry_points:
+    - generate_premetandspatial.py = cetbtools.generate_premetandspatial:generate_premetandspatial
+    - generate_bad_premetandspatial.py = cetbtools.generate_bad_premetandspatial:generate_bad_premetandspatial
+
+requirements:
+  build:
+    - python 2.7*
+    - click 
+    - fabric 1.12.0
+    - flake8 3.0.4
+    - nose
+    - nose-exclude
+    - rednose
+    - numpy 1.11.2
+    - matplotlib 1.5.3
+    - proj4
+    - gdal 2.0.0
+    - libgdal 2.0.0 0
+    - krb5
+    - netcdf4 1.2.4
+    - affine
+  run:
+    - python 2.7*
+    - click
+    - numpy 1.11.2
+    - matplotlib 1.5.3
+    - proj4
+    - gdal 2.0.0
+    - libgdal 2.0.0 0
+    - krb5
+    - netcdf4 1.2.4
+    - affine
+
+
+test:
+ imports:
+   - cetbtools.inspector
+   - cetbtools.ease2conv
+   - cetbtools.generate_premetandspatial
+   - cetbtools.generate_bad_premetandspatial
+#    # anything that should be importable from your package
+#    # - import foo
+#    # - from foo import bar
+#  commands:
+#    # commands to run post-install of package to test entry_points
+#    # - command --help
+#    # - command --version
+
+about:
+  home: https://bitbucket.org/nsidc/cetbtools
+  license: GPLv3
+  summary: Python tools from the NSIDC Passive Microwave ESDR project

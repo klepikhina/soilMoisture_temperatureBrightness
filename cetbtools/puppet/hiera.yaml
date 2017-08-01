@@ -1,0 +1,22 @@
+:yaml:
+  :datadir: .
+:hierarchy:
+  - "puppet/%{environment}"
+  - puppet/hiera
+  - scm_creds
+  - vagrant-nsidc
+:merge_behavior: deeper
+
+classes:
+  - nsidc_emacs
+  - nsidc_nfs
+  - nsidc_miniconda
+
+nsidc_nfs::sharemounts:
+
+  /projects/PMESDR:
+    project: projects
+    share: PMESDR
+    options: rw   # permissions might be a problem for user vagrant
+
+

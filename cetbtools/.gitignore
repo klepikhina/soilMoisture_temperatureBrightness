@@ -1,0 +1,11 @@
+/.nsidc-project.yaml
+/.vagrant-*
+/puppet/.libraria*
+/puppet/.tmp*
+/puppet/Puppetfile.lock
+/puppet/modules/*
+**/*.pyc
+/source/__conda_artifact_name__.txt
+/source/cetbtools/test/*png
+/source/cetbtools/test/*.tif
+*~
